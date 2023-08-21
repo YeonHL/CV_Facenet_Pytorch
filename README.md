@@ -1,2 +1,5 @@
-# Face_recognition_Facenet_Python
-Face recognition using facenet in python
+# CV_Facenet_Pytorch
+
+Implement face recognition using facenet, pytorch.
+
+[Original README](README_ORIGIN.md)
