@@ -16,8 +16,15 @@ import os
 
 data_dir = './data/test_images'
 
+# 한 번의 학습 단계에서 사용되는 데이터 배치의 크기
 batch_size = 32
+
+# 전체 데이터셋을 학습하는 데 필요한 에폭(epoch) 수 에폭은 전체 데이터셋을 한 번 훑는 것을 의미
 epochs = 8
+
+# 데이터를 불러오고 전처리하는 데 사용되는 워커(작업자)의 수
+# PyTorch의 DataLoader는 병렬화를 통해 데이터를 효율적으로 로드하는데, workers 수는 병렬 처리에 사용되는 프로세스 수를 결정
+# Windows 환경에서는 멀티프로세싱이 일부 문제를 일으킬 수 있어서 0으로 설정하여 비활성화하는 경우가 종종 있습니다.
 workers = 0 if os.name == 'nt' else 8
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
