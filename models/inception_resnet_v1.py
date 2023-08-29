@@ -8,6 +8,9 @@ from torch.nn import functional as F
 
 from .utils.download import download_url_to_file
 
+# 학습과 인식의 Model 설정값 통일을 위해 구현
+from models.setting import Setting
+setting = Setting()
 
 class BasicConv2d(nn.Module):
 
@@ -313,20 +316,16 @@ def load_weights(mdl, name):
         ValueError: If 'pretrained' not equal to 'vggface2' or 'casia-webface'.
     """
     if name == 'vggface2':
-        path = 'https://github.com/timesler/facenet-pytorch/releases/download/v2.2.9/20180402-114759-vggface2.pt'
+        path = setting.vgg_path
     elif name == 'casia-webface':
-        path = 'https://github.com/timesler/facenet-pytorch/releases/download/v2.2.9/20180408-102900-casia-webface.pt'
+        path = setting.casia_path
     else:
         raise ValueError('Pretrained models only exist for "vggface2" and "casia-webface"')
 
-    model_dir = os.path.join(get_torch_home(), 'checkpoints')
-    os.makedirs(model_dir, exist_ok=True)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"모델 파일 '{path}'을 찾을 수 없습니다.")
 
-    cached_file = os.path.join(model_dir, os.path.basename(path))
-    if not os.path.exists(cached_file):
-        download_url_to_file(path, cached_file)
-
-    state_dict = torch.load(cached_file)
+    state_dict = torch.load(path)
     mdl.load_state_dict(state_dict)
 
 

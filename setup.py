@@ -41,5 +41,6 @@ setuptools.setup(
         'torchvision',
         'pillow',
         'tensorboard'
+        'opencv-python'
     ],
 )

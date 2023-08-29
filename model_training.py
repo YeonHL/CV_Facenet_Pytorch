@@ -1,4 +1,8 @@
-from facenet_pytorch import InceptionResnetV1, fixed_image_standardization, training
+# TODO: 클래스 이름 파일로 저장하기
+# 폐쇄망 환경을 위해 커스텀하여 사용 (모델 파일은 README를 참고하여 수동 다운)
+from models.inception_resnet_v1 import InceptionResnetV1
+
+from facenet_pytorch import MTCNN, fixed_image_standardization, training
 import torch
 from torch.utils.data import DataLoader, SubsetRandomSampler
 from torch import optim
@@ -8,13 +12,30 @@ from torchvision import datasets, transforms
 import numpy as np
 import os
 
-
 # 학습과 인식의 Model 설정값 통일을 위해 구현
 from models.setting import Setting
+
+# 체크포인트 관련 모듈
+from models.checkpoint import save_checkpoint, load_checkpoint
+
 setting = Setting()
-
-
 workers = 0 if os.name == 'nt' else 8
+
+
+# MTCNN은 얼굴 탐지 및 정렬을 위해 사용합니다.
+# image_size: 얼굴 이미지를 어떤 크기로 변환할지를 결정하는 매개변수, 160으로 설정되어 있으므로, 입력 이미지는 160x160 크기로 변환
+# margin: 얼굴 주위에 추가할 여유 공간(margin)을 결정하는 매개변수, 0이면 얼굴 주위에 여유 공간이 추가되지 않습니다.
+# min_face_size: 감지할 수 있는 최소 얼굴 크기를 결정, 픽셀 단위이며 가로, 세로 모두 해당
+# thresholds: 얼굴 감지 단계에서 사용되는 임계값(threshold)
+# factor: 이미지 스케일을 조정하기 위한 스케일 팩터(scale factor)
+# post_process: 후처리 과정을 수행할 지 여부를 결정하는 변수, True일 때 후처리 과정을 수행
+# device: 얼굴 감지 모델이 실행될 디바이스를 결정, 위에서 설정한 device 변수를 사용하여 설정합니다.
+# 자세한 내용은 help(MTCNN) 참고하기
+mtcnn = MTCNN(
+    image_size=160, margin=0, min_face_size=20,
+    thresholds=[0.6, 0.7, 0.7], factor=0.709, post_process=True,
+    device=setting.device
+)
 
 
 # 이미지 데이터를 불러오기 위해 PyTorch의 ImageFolder 데이터셋 클래스를 사용
@@ -25,7 +46,7 @@ dataset = datasets.ImageFolder(setting.image_path, transform=transforms.Resize((
 # 데이터 경로를 원본 데이터 경로에서 잘려진(cropped) 데이터 경로로 변경하는 작업을 수행
 dataset.samples = [
     (p, p.replace(setting.image_path, setting.image_path + '_cropped'))
-        for p, _ in dataset.samples
+    for p, _ in dataset.samples
 ]
 
 
@@ -43,21 +64,18 @@ loader = DataLoader(
 # MTCNN 모델을 사용하여 얼굴을 감지하고, 해당 얼굴 이미지를 y 경로에 저장합니다.
 # 현재 진행 중인 배치의 번호와 전체 배치의 수를 출력, \r은 커서를 맨 앞으로 옮겨서 덮어쓰기를 통해 진행 상황을 출력
 for i, (x, y) in enumerate(loader):
-    setting.mtcnn(x, save_path=y)
+    mtcnn(x, save_path=y)
+    identifiers = [os.path.basename(p) for p in y]
+
     print('\rBatch {} of {}'.format(i + 1, len(loader)), end='')
 
 # del mtcnn: GPU 메모리 사용량을 줄이기 위해 MTCNN 모델을 삭제합니다.
-setting.del_mtcnn()
+del mtcnn
 
 
-# TODO: resnet 처리하기
 # Define Inception Resnet V1 module
+# 인터넷 연결 필요 (Checkpoint 배포
 # 자세한 내용은 help(InceptionResnetV1)를 참고하세요.
-# num_classes=len(dataset.class_to_idx): 입니다. 합니다.
-
-# 얼굴 임베딩을 생성하는데 사용되는 InceptionResNetV1 모델 초기화
-# 데이터셋마다 num_classes가 달라지므로 하나의 모델 파일만 사용하는 것이 불가능
-# 폐쇄망에서 사용하기 위해선
 resnet = InceptionResnetV1(
     classify=setting.classify,
     pretrained=setting.pretrained,
@@ -104,13 +122,15 @@ train_loader = DataLoader(
     dataset,
     num_workers=workers,
     batch_size=setting.batch_size,
-    sampler=SubsetRandomSampler(train_inds)
+    sampler=SubsetRandomSampler(train_inds),
+    collate_fn=lambda batch: [item for sublist in batch for item in sublist]  # Flatten the batch list
 )
 val_loader = DataLoader(
     dataset,
     num_workers=workers,
     batch_size=setting.batch_size,
-    sampler=SubsetRandomSampler(val_inds)
+    sampler=SubsetRandomSampler(val_inds),
+    collate_fn=lambda batch: [item for sublist in batch for item in sublist]  # Flatten the batch list
 )
 
 
@@ -129,11 +149,15 @@ metrics = {
 
 
 # Train model
+# 기존에 저장된 정보가 있는지 확인하고 있을 경우 불러오기
+if os.path.exists(setting.model_path):
+    resnet.load_state_dict(torch.load(setting.model_path))
+    print(f"Loaded model from {setting.model_path}")
+
 # TensorBoard를 사용하여 학습 과정을 시각화하기 위한 SummaryWriter를 생성
 writer = SummaryWriter()
 writer.iteration = setting.writer_iteration
 writer.interval = setting.writer_interval
-
 
 print('\n\nInitial')
 print('-' * 10)
@@ -151,13 +175,15 @@ validation_loss = training.pass_epoch(
 )
 
 # 반복문을 통해 각 에폭(epoch)마다 학습 및 검증 단계를 반복하면서 모델을 학습
-
 # 가장 낮은 검증 손실을 가진 모델을 저장하기 위한 변수
 best_val_loss = validation_loss
-best_epoch = 0
 
-for epoch in range(setting.epochs):
-    print('\nEpoch {}/{}'.format(epoch + 1, setting.epochs))
+if os.path.exists(setting.checkpoint_path):
+    resnet, optimizer, best_val_loss, start_epoch = load_checkpoint(resnet, optimizer, setting.checkpoint_path)
+    print(f"Loaded checkpoint from {setting.checkpoint_path}, starting from epoch {start_epoch + 1}")
+
+for epoch in range(setting.start_epoch,setting.end_epochs):
+    print('\nEpoch {}/{}'.format(epoch + 1, setting.end_epochs))
     print('-' * 10)
 
     resnet.train()
@@ -174,11 +200,18 @@ for epoch in range(setting.epochs):
         writer=writer
     )
 
-    # 가장 낮은 검증 손실을 가진 모델을 저장
+    # 검증 손실이 낮을 경우 모델 저장 및 체크포인트 업데이트
     if validation_loss < best_val_loss:
         best_val_loss = validation_loss
-        best_epoch = epoch
-        torch.save(resnet.state_dict(), setting.save_path)
+        save_checkpoint(resnet, optimizer, best_val_loss, epoch, setting.checkpoint_path)
+        print("Checkpoint saved.")
 
-# 학습 및 로깅이 끝난 후 SummaryWriter를 닫습니다.
+# 학습 및 로깅이 끝난 후 모델을 저장하고 SummaryWriter를 닫습니다.
+# 가장 낮은 검증 손실을 가진 모델을 저장
+torch.save(resnet.state_dict(), setting.model_path)
+print(f"모델을 {setting.model_path}에 저장했습니다.")
+
+os.remove(setting.checkpoint_path)
+print(f"체크포인트 {setting.checkpoint_path}를 제거했습니다.")
+
 writer.close()
