@@ -16,8 +16,10 @@ class Setting:
 
 
         # 인식용 설정값
-        os.makedirs(os.path.join(self.root_path, 'data', 'recog_images'), exist_ok=True)
-        self.recog_image_path = os.path.join(self.root_path, "data", 'recog_images')
+        os.makedirs(os.path.join(self.root_path, 'data', 'test_images'), exist_ok=True)
+        self.test_image_path = os.path.join(self.root_path, "data", 'test_images')
+
+        self.pickle_path = os.path.join(self.root_path, "models", "recog_pickle.pkl")
 
         self.threshold = 1.5
 

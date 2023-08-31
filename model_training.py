@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
 import numpy as np
 import os
+import pickle
 
 # 학습과 인식의 Model 설정값 통일을 위해 구현
 from models.setting import Setting
@@ -19,8 +20,21 @@ from models.setting import Setting
 # 체크포인트 관련 모듈
 from models.checkpoint import save_checkpoint, load_checkpoint
 
+def count_subfolders(directory):
+    subfolder_count = 0
+    for _, dirs, _ in os.walk(directory):
+        subfolder_count += len(dirs)
+    return subfolder_count
+
+
 setting = Setting()
 workers = 0 if os.name == 'nt' else 8
+
+recog_subfolder_count = count_subfolders(setting.test_image_path)
+train_subfolder_count = count_subfolders(setting.train_image_path)
+
+if recog_subfolder_count != train_subfolder_count:
+    raise ValueError("test_images 폴더와 train_images 폴더의 하위 폴더 수가 다릅니다.")
 
 # 얼굴 탐지 및 정렬을 위해 사용
 mtcnn = MTCNN(
@@ -32,21 +46,21 @@ mtcnn = MTCNN(
 
 # 이미지 데이터를 불러오기 위해 PyTorch의 ImageFolder 데이터셋 클래스를 사용
 # data_dir에서 데이터를 로드하고, transforms.Resize((512, 512))를 통해 이미지 크기를 512x512로 조정
-dataset = datasets.ImageFolder(setting.train_image_path, transform=transforms.Resize((512, 512)))
+train_dataset = datasets.ImageFolder(setting.train_image_path, transform=transforms.Resize((512, 512)))
 
 # 데이터셋의 각 이미지에 대한 경로와 해당 이미지의 클래스 레이블을 저장한 리스트
 # 데이터 경로를 원본 데이터 경로에서 잘려진(cropped) 데이터 경로로 변경하는 작업을 수행
-dataset.samples = [
+train_dataset.samples = [
     (p, p.replace(setting.train_image_path, setting.train_image_path + '_cropped'))
-    for p, _ in dataset.samples
+    for p, _ in train_dataset.samples
 ]
 
 
 # 데이터셋을 배치로 나누어 로딩하기 위해 PyTorch의 DataLoader를 사용
 # num_workers, batch_size, 그리고 collate_fn 등을 설정
 # collate_fn은 배치를 형성하는 과정에서 사용할 함수로, 이 경우 training.collate_pil 함수 사용
-loader = DataLoader(
-    dataset,
+dataset_loader = DataLoader(
+    train_dataset,
     num_workers=workers,
     batch_size=setting.batch_size,
     collate_fn=training.collate_pil
@@ -55,13 +69,11 @@ loader = DataLoader(
 # DataLoader를 통해 배치 단위로 이미지 데이터와 레이블을 반복적으로 가져옵니다.
 # MTCNN 모델을 사용하여 얼굴을 감지하고, 해당 얼굴 이미지를 y 경로에 저장합니다.
 # 현재 진행 중인 배치의 번호와 전체 배치의 수를 출력, \r은 커서를 맨 앞으로 옮겨서 덮어쓰기를 통해 진행 상황을 출력
-for i, (x, y) in enumerate(loader):
+for i, (x, y) in enumerate(dataset_loader):
     mtcnn(x, save_path=y)
-    print('\rBatch {} of {}'.format(i + 1, len(loader)), end='')
+    print('\rBatch {} of {}'.format(i + 1, len(dataset_loader)), end='')
 
-# del mtcnn: GPU 메모리 사용량을 줄이기 위해 MTCNN 모델을 삭제합니다.
 print()
-del mtcnn
 
 
 # Define Inception Resnet V1 module
@@ -70,7 +82,7 @@ del mtcnn
 resnet = InceptionResnetV1(
     classify=setting.classify,
     pretrained=setting.pretrained,
-    num_classes=len(dataset.class_to_idx)
+    num_classes=len(train_dataset.class_to_idx)
     # 모델을 지정한 디바이스(GPU 또는 CPU)로 옮깁니다.
 ).to(setting.device)
 
@@ -95,10 +107,10 @@ trans = transforms.Compose([
 ])
 
 # 얼굴 이미지 데이터셋을 불러옵니다. 이미지 변환으로 위에서 정의한 변환 파이프라인 trans을 사용합니다.
-dataset = datasets.ImageFolder(setting.train_image_path + '_cropped', transform=trans)
+train_dataset_cropped = datasets.ImageFolder(setting.train_image_path + '_cropped', transform=trans)
 
 # 데이터셋 내의 이미지 인덱스를 담은 배열
-img_inds = np.arange(len(dataset))
+img_inds = np.arange(len(train_dataset_cropped))
 np.random.shuffle(img_inds)
 
 # 전체 데이터셋 중 학습용과 검증용으로 분할된 이미지 인덱스 배열
@@ -110,13 +122,13 @@ val_inds = img_inds[int(0.8 * len(img_inds)):]
 # SubsetRandomSampler를 사용하여 지정된 인덱스를 기반으로 데이터를 로드
 # 학습과 검증 데이터가 무작위로 섞이며 배치 단위로 데이터를 가져옵니다.
 train_loader = DataLoader(
-    dataset,
+    train_dataset_cropped,
     num_workers=workers,
     batch_size=setting.batch_size,
     sampler=SubsetRandomSampler(train_inds)
 )
 val_loader = DataLoader(
-    dataset,
+    train_dataset_cropped,
     num_workers=workers,
     batch_size=setting.batch_size,
     sampler=SubsetRandomSampler(val_inds)
@@ -124,7 +136,7 @@ val_loader = DataLoader(
 
 
 # Define loss and evaluation functions
-    # 크로스 엔트로피 손실 함수를 초기화, 분류 문제에서 주로 사용되며, 신경망 출력과 실제 레이블 간의 손실을 계산
+# 크로스 엔트로피 손실 함수를 초기화, 분류 문제에서 주로 사용되며, 신경망 출력과 실제 레이블 간의 손실을 계산
 loss_fn = torch.nn.CrossEntropyLoss()
 
 # 모델 평가를 위한 여러 메트릭(metric)을 포함하는 딕셔너리
@@ -205,3 +217,52 @@ if os.path.exists(setting.checkpoint_path):
     print(f"체크포인트 {setting.checkpoint_path}를 제거했습니다.")
 
 writer.close()
+
+
+# TODO: 모델 학습, 임베딩 추출 등의 부분들을 각각 따로 구현하기
+# TODO: known_embeddings과 names는 모델 학습 단계에서 파일로 추출하고 불러와서 사용하기
+test_dataset = datasets.ImageFolder(setting.test_image_path)
+test_dataset.idx_to_class = {i: c for c, i in test_dataset.class_to_idx.items()}
+
+def collate_fn(x):
+    # 'collate_fn' 함수를 통해 배치 데이터를 생성합니다.
+    return x[0]
+
+# DataLoader 설정:
+# 데이터셋을 DataLoader로 로드합니다.
+test_loader = DataLoader(test_dataset, collate_fn=collate_fn, num_workers=workers)
+
+# 얼굴 탐지 및 얼굴 임베딩 추출:
+# 잘린 얼굴 이미지가 아닌 경계 상자를 얻으려면 대신 하위 수준 mtcnn.detect() 함수를 호출하면 됩니다.
+# 자세한 내용은 help(mtcnn.detect)를 참조하세요.
+aligned = []
+names = []
+
+# DataLoader에서 얼굴 이미지와 해당 레이블을 하나씩 가져와서 다음 작업을 수행합니다:
+for x, y in test_loader:
+    # MTCNN을 사용하여 얼굴을 탐지하고, 얼굴이 감지된 경우 MTCNN 포워드 메서드는 감지된 얼굴에 맞게 잘린 이미지를 반환합니다.
+    # 기본적으로 감지된 얼굴은 하나만 반환되며, 감지된 모든 얼굴을 반환하려면 MTCNN 객체를 생성할 때 keep_all=True로 설정합니다.
+    x_aligned = mtcnn(x)
+    if x_aligned is not None:
+        # 탐지된 얼굴 이미지로부터 얼굴 임베딩을 추출하여 해당 얼굴의 레이블과 함께 리스트에 저장합니다.
+        aligned.append(x_aligned)
+        names.append(test_dataset.idx_to_class[y])
+
+# 얼굴 간의 거리 계산 및 출력:
+# MTCNN은 모두 동일한 크기의 얼굴 이미지를 반환하므로 리셋 인식 모듈로 쉽게 일괄 처리할 수 있습니다.
+# 여기서는 이미지가 몇 개 밖에 없으므로 단일 배치를 빌드하고 추론을 수행합니다.
+# 실제 데이터 세트의 경우, 특히 GPU에서 처리하는 경우에는 코드를 수정하여 Resnet에 전달되는 배치 크기를 제어해야 합니다.
+# 반복 테스트의 경우, 잘린 얼굴이나 경계 상자의 계산을 한 번만 수행하고 감지된 얼굴은 나중에 사용할 수 있도록 저장할 수 있으므로
+# 얼굴 감지(MTCNN 사용)와 임베딩 또는 분류(InceptionResnetV1 사용)를 분리하는 것이 가장 좋습니다.
+
+# 추출된 얼굴 임베딩을 사용하여 얼굴 간의 거리(유사도)를 계산합니다.
+known_aligned = torch.stack(aligned).to(setting.device)
+known_embeddings = resnet(known_aligned).detach().cpu()
+
+data_to_save = {
+    'known_embeddings': known_embeddings,
+    'names': names
+}
+
+with open(setting.pickle_path, 'wb') as f:
+    pickle.dump(data_to_save, f)
