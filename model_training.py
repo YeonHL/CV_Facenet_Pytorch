@@ -220,7 +220,6 @@ writer.close()
 
 
 # TODO: 모델 학습, 임베딩 추출 등의 부분들을 각각 따로 구현하기
-# TODO: known_embeddings과 names는 모델 학습 단계에서 파일로 추출하고 불러와서 사용하기
 test_dataset = datasets.ImageFolder(setting.test_image_path)
 test_dataset.idx_to_class = {i: c for c, i in test_dataset.class_to_idx.items()}
 
