@@ -10,7 +10,7 @@ GITHUB_URL = 'https://github.com/timesler/facenet-pytorch'
 parent_dir = os.path.dirname(os.path.realpath(__file__))
 import_name = os.path.basename(parent_dir)
 
-with open('{}/README.md'.format(parent_dir), 'r') as f:
+with open('{}/README.md'.format(parent_dir), 'r', encoding='utf-8') as f:
     long_description = f.read()
 
 setuptools.setup(
@@ -40,7 +40,7 @@ setuptools.setup(
         'requests',
         'torchvision',
         'pillow',
-        'tensorboard'
+        'tensorboard',
         'opencv-python'
     ],
 )

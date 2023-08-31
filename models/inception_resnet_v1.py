@@ -1,12 +1,9 @@
 import os
-import requests
-from requests.adapters import HTTPAdapter
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from .utils.download import download_url_to_file
 
 # 학습과 인식의 Model 설정값 통일을 위해 구현
 from models.setting import Setting

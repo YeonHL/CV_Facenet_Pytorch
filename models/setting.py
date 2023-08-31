@@ -1,12 +1,4 @@
-from facenet_pytorch import MTCNN, InceptionResnetV1, fixed_image_standardization, training
 import torch
-from torch.utils.data import DataLoader, SubsetRandomSampler, _utils
-from torch import optim
-from torch.optim.lr_scheduler import MultiStepLR
-from torch.utils.tensorboard import SummaryWriter
-from torchvision import datasets, transforms
-import numpy as np
-import pandas as pd
 import os
 
 class Setting:
@@ -22,13 +14,21 @@ class Setting:
         # 현재 장비 인식 (GPU / CPU)
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-        # TODO: 임베딩을 위한 목록 파일 경로
+
+        # 인식용 설정값
+        os.makedirs(os.path.join(self.root_path, 'data', 'recog_images'), exist_ok=True)
+        self.recog_image_path = os.path.join(self.root_path, "data", 'recog_images')
+
+        self.threshold = 1.5
+
 
         # 모델 학습용 설정값
 
         # 학습에 사용할 이미지 데이터의 디렉토리 경로
-        self.image_path = os.path.join(self.root_path,"data",'images')
+        os.makedirs(os.path.join(self.root_path, 'data','train_images'), exist_ok=True)
+        self.train_image_path = os.path.join(self.root_path, "data", 'train_images')
 
+        # 체크포인트 파일을 저장할 디렉토리 경로
         os.makedirs(os.path.join(self.root_path, 'checkpoints'), exist_ok=True)
         self.checkpoint_path = os.path.join(self.root_path,"checkpoints","checkpoint.pth")
 
@@ -73,5 +73,44 @@ class Setting:
         # True로 설정하면 분류를 위한 출력 레이어가 모델에 포함
         self.classify = True
 
+# TODO: Setting 조회 부분 완성하기
+def menu():
+    print("\n확인하고 싶은 설정의 번호를 입력해주세요.")
+    print("1. 학습 관련 설정")
+    print("2. 인식 관련 설정\n")
+    print("======== 공통 설정 ========")
+    print("3. root_path: 파일을 실행한 디렉토리 경로")
+    print("4. model_path: 학습한 모델 파일 경로")
+    print("5. device: 실행되고 있는 장치 정보 (GPU/CPU)")
+    print("프로그램을 종료하고 싶을 경우 q를 입력해주세요.")
+
 if __name__ == '__main__':
-    pass
+    setting = Setting()
+    want_to_see = ""
+
+    while not want_to_see == "q":
+
+
+        want_to_see = input()
+
+        if want_to_see == "1":
+            print("\n======== 학습 관련 설정 ========")
+            print("1. batch_size: 한 번의 학습에 사용할 데이터 샘플의 수")
+            print("2. end_epochs: 전체 데이터셋을 몇 번 반복해서 학습할지 결정하는 변수")
+            print("3. learning_rate: 모델 학습률")
+            print("4. scheduler_epoch: 몇 번째 epoch 이후 학습률을 조정할지 결정하는 변수")
+            print("5. writer_interval: Writer의 로그 기록 반복 횟수")
+            print("6. train_image_path: 학습에 사용할 이미지들의 디렉토리 경로")
+            print("7. checkpoint_path: 체크포인트 파일이 저장될 디렉토리 경로")
+            print("8. vgg_path: 사전 학습된 VGGFace2 모델 파일 경로")
+            print("9. casia_path: 사전 학습된 Casia-Webface 모델 파일 경로")
+        elif want_to_see == "2":
+            print("\n======== 인식 관련 설정 ========")
+            print("1. recog_image_path: 인식에 사용할 이미지들의 디렉토리 경로")
+            # 인식 관련 설정 정보 출력 코드 추가
+        else:
+            print("잘못된 입력입니다. 다시 시도하세요.")
+
+        want_to_see = input()
+
+    print("프로그램을 종료합니다.")

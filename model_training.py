@@ -1,4 +1,5 @@
-# TODO: 클래스 이름 파일로 저장하기
+# TODO: 전이 학습에는 새로운 데이터셋만 입력해야 한다. 기존 데이터셋까지 함께 처음부터 구현하는 버전은 따로 만들기
+
 # 폐쇄망 환경을 위해 커스텀하여 사용 (모델 파일은 README를 참고하여 수동 다운)
 from models.inception_resnet_v1 import InceptionResnetV1
 
@@ -21,16 +22,7 @@ from models.checkpoint import save_checkpoint, load_checkpoint
 setting = Setting()
 workers = 0 if os.name == 'nt' else 8
 
-
-# MTCNN은 얼굴 탐지 및 정렬을 위해 사용합니다.
-# image_size: 얼굴 이미지를 어떤 크기로 변환할지를 결정하는 매개변수, 160으로 설정되어 있으므로, 입력 이미지는 160x160 크기로 변환
-# margin: 얼굴 주위에 추가할 여유 공간(margin)을 결정하는 매개변수, 0이면 얼굴 주위에 여유 공간이 추가되지 않습니다.
-# min_face_size: 감지할 수 있는 최소 얼굴 크기를 결정, 픽셀 단위이며 가로, 세로 모두 해당
-# thresholds: 얼굴 감지 단계에서 사용되는 임계값(threshold)
-# factor: 이미지 스케일을 조정하기 위한 스케일 팩터(scale factor)
-# post_process: 후처리 과정을 수행할 지 여부를 결정하는 변수, True일 때 후처리 과정을 수행
-# device: 얼굴 감지 모델이 실행될 디바이스를 결정, 위에서 설정한 device 변수를 사용하여 설정합니다.
-# 자세한 내용은 help(MTCNN) 참고하기
+# 얼굴 탐지 및 정렬을 위해 사용
 mtcnn = MTCNN(
     image_size=160, margin=0, min_face_size=20,
     thresholds=[0.6, 0.7, 0.7], factor=0.709, post_process=True,
@@ -40,12 +32,12 @@ mtcnn = MTCNN(
 
 # 이미지 데이터를 불러오기 위해 PyTorch의 ImageFolder 데이터셋 클래스를 사용
 # data_dir에서 데이터를 로드하고, transforms.Resize((512, 512))를 통해 이미지 크기를 512x512로 조정
-dataset = datasets.ImageFolder(setting.image_path, transform=transforms.Resize((512, 512)))
+dataset = datasets.ImageFolder(setting.train_image_path, transform=transforms.Resize((512, 512)))
 
 # 데이터셋의 각 이미지에 대한 경로와 해당 이미지의 클래스 레이블을 저장한 리스트
 # 데이터 경로를 원본 데이터 경로에서 잘려진(cropped) 데이터 경로로 변경하는 작업을 수행
 dataset.samples = [
-    (p, p.replace(setting.image_path, setting.image_path + '_cropped'))
+    (p, p.replace(setting.train_image_path, setting.train_image_path + '_cropped'))
     for p, _ in dataset.samples
 ]
 
@@ -65,11 +57,10 @@ loader = DataLoader(
 # 현재 진행 중인 배치의 번호와 전체 배치의 수를 출력, \r은 커서를 맨 앞으로 옮겨서 덮어쓰기를 통해 진행 상황을 출력
 for i, (x, y) in enumerate(loader):
     mtcnn(x, save_path=y)
-    identifiers = [os.path.basename(p) for p in y]
-
     print('\rBatch {} of {}'.format(i + 1, len(loader)), end='')
 
 # del mtcnn: GPU 메모리 사용량을 줄이기 위해 MTCNN 모델을 삭제합니다.
+print()
 del mtcnn
 
 
@@ -104,7 +95,7 @@ trans = transforms.Compose([
 ])
 
 # 얼굴 이미지 데이터셋을 불러옵니다. 이미지 변환으로 위에서 정의한 변환 파이프라인 trans을 사용합니다.
-dataset = datasets.ImageFolder(setting.image_path + '_cropped', transform=trans)
+dataset = datasets.ImageFolder(setting.train_image_path + '_cropped', transform=trans)
 
 # 데이터셋 내의 이미지 인덱스를 담은 배열
 img_inds = np.arange(len(dataset))
@@ -122,20 +113,18 @@ train_loader = DataLoader(
     dataset,
     num_workers=workers,
     batch_size=setting.batch_size,
-    sampler=SubsetRandomSampler(train_inds),
-    collate_fn=lambda batch: [item for sublist in batch for item in sublist]  # Flatten the batch list
+    sampler=SubsetRandomSampler(train_inds)
 )
 val_loader = DataLoader(
     dataset,
     num_workers=workers,
     batch_size=setting.batch_size,
-    sampler=SubsetRandomSampler(val_inds),
-    collate_fn=lambda batch: [item for sublist in batch for item in sublist]  # Flatten the batch list
+    sampler=SubsetRandomSampler(val_inds)
 )
 
 
 # Define loss and evaluation functions
-# 크로스 엔트로피 손실 함수를 초기화, 분류 문제에서 주로 사용되며, 신경망 출력과 실제 레이블 간의 손실을 계산
+    # 크로스 엔트로피 손실 함수를 초기화, 분류 문제에서 주로 사용되며, 신경망 출력과 실제 레이블 간의 손실을 계산
 loss_fn = torch.nn.CrossEntropyLoss()
 
 # 모델 평가를 위한 여러 메트릭(metric)을 포함하는 딕셔너리
@@ -179,7 +168,7 @@ validation_loss = training.pass_epoch(
 best_val_loss = validation_loss
 
 if os.path.exists(setting.checkpoint_path):
-    resnet, optimizer, best_val_loss, start_epoch = load_checkpoint(resnet, optimizer, setting.checkpoint_path)
+    resnet, optimizer, best_val_loss, start_epoch = load_checkpoint(resnet, optimizer)
     print(f"Loaded checkpoint from {setting.checkpoint_path}, starting from epoch {start_epoch + 1}")
 
 for epoch in range(setting.start_epoch,setting.end_epochs):
@@ -203,7 +192,7 @@ for epoch in range(setting.start_epoch,setting.end_epochs):
     # 검증 손실이 낮을 경우 모델 저장 및 체크포인트 업데이트
     if validation_loss < best_val_loss:
         best_val_loss = validation_loss
-        save_checkpoint(resnet, optimizer, best_val_loss, epoch, setting.checkpoint_path)
+        save_checkpoint(resnet, optimizer, best_val_loss, epoch)
         print("Checkpoint saved.")
 
 # 학습 및 로깅이 끝난 후 모델을 저장하고 SummaryWriter를 닫습니다.
@@ -211,7 +200,8 @@ for epoch in range(setting.start_epoch,setting.end_epochs):
 torch.save(resnet.state_dict(), setting.model_path)
 print(f"모델을 {setting.model_path}에 저장했습니다.")
 
-os.remove(setting.checkpoint_path)
-print(f"체크포인트 {setting.checkpoint_path}를 제거했습니다.")
+if os.path.exists(setting.checkpoint_path):
+    os.remove(setting.checkpoint_path)
+    print(f"체크포인트 {setting.checkpoint_path}를 제거했습니다.")
 
 writer.close()
