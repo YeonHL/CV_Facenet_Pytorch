@@ -21,3 +21,6 @@ def load_checkpoint(model, optimizer):
     loss = checkpoint['loss']
     setting.start_epoch = checkpoint['epoch']
     return model, optimizer, loss
+
+if __name__ == '__main__':
+    pass
